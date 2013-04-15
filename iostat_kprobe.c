@@ -32,29 +32,21 @@
 
 #include<linux/fs.h>
 #include<linux/list.h>
-
 #include<linux/device.h>
 #include<linux/genhd.h>
 #include<linux/ctype.h>
 #include<linux/spinlock.h>
 #include<linux/blkdev.h>
 
-struct part_info {
-	struct list_head list;
-	struct hd_struct *part;
-	struct part_info *part0_info;
-	struct gendisk   *disk;
-	unsigned long    f_ios[2];
-	unsigned long    f_merges[2];
-	unsigned long    f_ticks[2];
-	unsigned long    f_sectors[2];
-	unsigned long    r_ios[2];
-	unsigned long    r_sectors[2];
-	unsigned long    p_count[3];
-	unsigned long    io_ticks;
-	unsigned long    time_in_queue;
-};
-static struct list_head  part_info_list;
+#include<linux/hash.h>
+
+#define SHIFT         10
+#define IOS           0
+#define MERGES        1
+#define TICKS         2
+#define SECTORS       3
+#define PCACHE        4
+#define MAX_HASH_LIST (1UL << SHIFT)
 
 static unsigned long  p_block_class               = 0;
 static unsigned long  p_disk_type                 = 0;
@@ -70,6 +62,35 @@ module_param(p_elv_bio_merged,ulong,S_IRUGO);
 module_param(p_blk_finish_request,ulong,S_IRUGO);
 module_param(p_elv_merge_requests,ulong,S_IRUGO);
 module_param(p_get_request_wait,ulong,S_IRUGO);
+
+struct proc_info {
+	struct list_head  list;
+	char              comm[TASK_COMM_LEN];
+	pid_t             pid;
+	pid_t             tgid;
+	unsigned long     ios[2];
+	unsigned long     merges[2];
+	unsigned long     ticks[2];
+	unsigned long     sectors[2];
+	unsigned long     pcache[2];
+};
+struct part_info {
+	struct list_head  list;
+	struct hd_struct  *part;
+	struct part_info  *part0_info;
+	struct gendisk    *disk;
+	unsigned long     f_ios[2];
+	unsigned long     f_merges[2];
+	unsigned long     f_ticks[2];
+	unsigned long     f_sectors[2];
+	unsigned long     r_ios[2];
+	unsigned long     r_sectors[2];
+	unsigned long     p_count[3];
+	unsigned long     io_ticks;
+	unsigned long     time_in_queue;
+};
+static struct list_head  proc_info_hlist[MAX_HASH_LIST];
+static struct list_head  part_info_list;
 
 static ssize_t dk_iostat_show(struct kobject *kobj,
 			struct kobj_attribute *attr,char *buf)
@@ -145,13 +166,122 @@ static inline int blk_do_io_stat(struct request *rq)
 	        (rq->cmd_flags & REQ_DISCARD));
 }
 
+static struct hd_struct *mapping_to_part(const struct address_space *mapping)
+{
+	struct block_device  *bdev;
+	if(unlikely(mapping == NULL))
+		return NULL;
+	if(unlikely(mapping->host == NULL))
+		return NULL;
+	if(unlikely(mapping->host->i_sb == NULL))
+		return NULL;
+	bdev = mapping->host->i_sb->s_bdev;
+	if(unlikely(bdev == NULL))
+		return NULL;
+	return bdev->bd_part;
+}
+
+static void proc_info_free(struct list_head *list, unsigned long list_len)
+{
+	unsigned long i;
+	struct list_head *tmp;
+	struct proc_info *info;
+	for(i=0; i<list_len; ++i)
+	{
+		tmp = list+i;
+		if(!list_empty(tmp))
+			list_for_each_entry(info,tmp,list)
+			{
+#ifdef __SHOW__
+				printk("%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
+					"TR:%8lu TW:%8lu SR:%8lu SW:%8lu PT:%8lu PH:%8lu\n",
+						info->pid,
+						info->comm,info->tgid,
+						info->ios[0],info->ios[1],
+						info->merges[0],info->merges[1],
+						info->ticks[0],info->ticks[1],
+						info->sectors[0],info->sectors[1],
+						info->pcache[0],info->pcache[1]
+						);
+#endif
+				kfree(info);
+			}
+	}
+	return;
+}
+
+static inline void init_proc_info(struct proc_info *info)
+{
+	memset(info,0,sizeof(struct proc_info));
+	INIT_LIST_HEAD(&info->list);
+	info->tgid = task_tgid_nr(current);
+	info->pid  = task_pid_nr(current);
+	memcpy(info->comm,current->comm,TASK_COMM_LEN);
+	return;
+}
+static inline void copy_task_comm(char *dst, char *src)
+{
+	if(memcmp(dst,src,TASK_COMM_LEN))
+		memcpy(dst,src,TASK_COMM_LEN);
+	return;
+}
+
+static void __proc_stat_acct(struct proc_info *info,unsigned int rw,
+		unsigned long val,unsigned long flag)
+{
+	switch(flag)
+	{
+		case IOS:
+			info->ios[rw] += val;	
+			break;
+		case MERGES:
+			info->merges[rw] += val;
+			break;
+		case TICKS:
+			info->ticks[rw] += val;
+			break;
+		case SECTORS:
+			info->sectors[rw] += val;
+			break;
+		case PCACHE:
+			info->pcache[rw] += val;
+		default:
+			break;
+	}
+	copy_task_comm(info->comm,current->comm);
+	return;
+}
+static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
+		unsigned long val,unsigned long flag)
+{
+	pid_t            tgid;
+	unsigned long    tmp;
+	struct proc_info *info;
+	tgid = task_tgid_nr(current);
+	tmp  = hash_long(tgid,SHIFT);
+	if(!list_empty(&hash_list[tmp]))
+		list_for_each_entry(info,&hash_list[tmp],list)
+		{
+			if(info->tgid == tgid)
+			{
+				__proc_stat_acct(info,rw,1,flag);
+				return;
+			}
+		}
+	info = kmalloc(sizeof(struct proc_info),GFP_ATOMIC);
+	if(info == NULL)
+		return;
+	init_proc_info(info);
+	list_add_tail(&info->list,&hash_list[tmp]);
+	__proc_stat_acct(info,rw,val,flag);
+}
+
 /* 查找连续的页面缓存 */
 static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
 	unsigned int                      nr_pages;
 	struct address_space              *mapping;
-	struct block_device               *bdev;
 	struct hd_struct                  *part;
 	struct part_info                  *info;
 	struct find_get_pages_contig_data *data;
@@ -162,20 +292,12 @@ static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 	mapping = (struct address_space *)(regs->di);
 	nr_pages = (unsigned int)(regs->si);
 #endif
+
+#ifdef __PAGE_CACHE_ACCT__
+	proc_stat_acct(proc_info_hlist,0,nr_pages,PCACHE);
+#endif
 	data = (struct find_get_pages_contig_data *)ri->data;
-	if(unlikely(mapping == NULL))
-	{
-		printk("address_space isnot exist!\n");
-		goto out;
-	}
-	if(unlikely(mapping->host == NULL))
-		goto out;
-	if(unlikely(mapping->host->i_sb == NULL))
-		goto out;
-	bdev = mapping->host->i_sb->s_bdev;
-	if(unlikely(bdev == NULL))
-		goto out;
-	part = bdev->bd_part;
+	part = mapping_to_part(mapping);
 	list_for_each_entry(info,&part_info_list,list)
 	{
 		if(info->part == part)
@@ -207,6 +329,10 @@ static int find_get_pages_contig_pos_ret_handler(struct kretprobe_instance *ri,
 #else
 	nr_pages = (unsigned int)(regs->ax);
 #endif
+
+#ifdef __PAGE_CACHE_ACCT__
+	proc_stat_acct(proc_info_hlist,1,nr_pages,PCACHE);
+#endif
 	data = (struct find_get_pages_contig_data *)ri->data;
 	if(data->info == NULL)
 		goto out;
@@ -232,7 +358,6 @@ static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
 	struct address_space      *mapping;
-	struct block_device       *bdev;
 	struct hd_struct          *part;
 	struct part_info          *info;
 	struct find_get_page_data *data;
@@ -241,20 +366,12 @@ static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 #else
 	mapping = (struct address_space *)(regs->di);
 #endif
+
+#ifdef __PAGE_CACHE_ACCT__
+	proc_stat_acct(proc_info_hlist,0,1,PCACHE);
+#endif
 	data = (struct find_get_page_data *)ri->data;
-	if(unlikely(mapping == NULL))
-	{
-		printk("address_space isnot exist!\n");
-		goto out;
-	}
-	if(unlikely(mapping->host == NULL))
-		goto out;
-	if(unlikely(mapping->host->i_sb == NULL))
-		goto out;
-	bdev = mapping->host->i_sb->s_bdev;
-	if(unlikely(bdev == NULL))
-		goto out;
-	part = bdev->bd_part;
+	part = mapping_to_part(mapping);
 	list_for_each_entry(info,&part_info_list,list)
 	{
 		if(info->part == part)
@@ -288,7 +405,12 @@ static int find_get_page_pos_ret_handler(struct kretprobe_instance *ri,
 	page = (struct page *)(regs->ax);
 #endif
 	data = (struct find_get_page_data *)ri->data;
-	if(page == NULL || data->info == NULL)
+	if(page == NULL)
+		goto out;
+#ifdef __PAGE_CACHE_ACCT__
+	proc_stat_acct(proc_info_hlist,1,1,PCACHE);
+#endif
+	if(data->info == NULL)
 		goto out;
 	else
 		goto count;
@@ -333,25 +455,12 @@ static int submit_bio_pre_probe(struct kprobe *probe,
 	}
 	return 0;
 count:
-	if(rw & WRITE)
+	++info->r_ios[rw];
+	info->r_sectors[rw] += bio_sectors(bio);
+	if(info->part0_info != NULL)
 	{
-		++info->r_ios[1];
-		info->r_sectors[1] += bio_sectors(bio);
-		if(info->part0_info != NULL)
-		{
-			++info->part0_info->r_ios[1];
-			info->part0_info->r_sectors[1] += bio_sectors(bio);
-		}
-	}
-	else
-	{
-		++info->r_ios[0];
-		info->r_sectors[0] += bio_sectors(bio);
-		if(info->part0_info != NULL)
-		{
-			++info->part0_info->r_ios[0];
-			info->part0_info->r_sectors[0] += bio_sectors(bio);
-		}
+		++info->part0_info->r_ios[rw];
+		info->part0_info->r_sectors[rw] += bio_sectors(bio);
 	}
 	return 0;
 }
@@ -367,7 +476,6 @@ static int __do_page_cache_readahead_pre_ret_handler(struct kretprobe_instance *
 			struct pt_regs *regs)
 {
 	struct address_space *mapping;
-	struct block_device  *bdev;
 	struct hd_struct     *part;
 	struct part_info     *info;
 
@@ -378,19 +486,7 @@ static int __do_page_cache_readahead_pre_ret_handler(struct kretprobe_instance *
 	mapping = (struct address_space *)(regs->di);
 #endif
 	data = (struct __do_page_cache_readahead_data *)ri->data;
-	if(unlikely(mapping == NULL))
-	{
-		printk("address_space isnot exist!\n");
-		goto out;
-	}
-	if(unlikely(mapping->host == NULL))
-		goto out;
-	if(unlikely(mapping->host->i_sb == NULL))
-		goto out;
-	bdev = mapping->host->i_sb->s_bdev;
-	if(unlikely(bdev == NULL))
-		goto out;
-	part = bdev->bd_part;
+	part = mapping_to_part(mapping);
 	list_for_each_entry(info,&part_info_list,list)
 	{
 		if(info->part == part)
@@ -447,7 +543,8 @@ static int elv_bio_merged_pre_handler(struct kprobe *probe,
 	rq  = (struct request *)(regs->si);
 #endif
 	rw = rq_data_dir(rq);
-	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH_SEQ))
+	proc_stat_acct(proc_info_hlist,rw,1,MERGES);
+	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
 	else
 		return 0;
@@ -488,7 +585,10 @@ static int blk_finish_request_pre_handler(struct kprobe *probe,
 	rq = (struct request *)(regs->di);
 #endif
 	rw   = rq_data_dir(rq);
-	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH_SEQ))
+	duration = jiffies - rq->start_time;
+	proc_stat_acct(proc_info_hlist,rw,1,IOS);
+	proc_stat_acct(proc_info_hlist,rw,duration,TICKS);
+	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
 	else
 		return 0;
@@ -501,7 +601,6 @@ static int blk_finish_request_pre_handler(struct kprobe *probe,
 
 count:
 	++info->f_ios[rw];
-	duration = jiffies - rq->start_time;
 	info->f_ticks[rw]   += duration;
 	if(info->part0_info != NULL)
 	{
@@ -548,7 +647,9 @@ static int blk_update_request_pre_handler(struct kprobe *probe,
 	if(!rq->bio)
 		return 0;
 	rw   = rq_data_dir(rq);
-	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH_SEQ))
+	proc_stat_acct(proc_info_hlist,rw,bytes >> 9,SECTORS);
+
+	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
 	else
 		return 0;
@@ -586,7 +687,7 @@ static int elv_merge_requests_pre_ret_handler(struct kretprobe_instance *ri,
 	rq = (struct request *)(regs->si);
 #endif
 	data = (struct elv_merge_requests_data *)ri->data;
-	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH_SEQ))
+	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
 	else
 		return 0;
@@ -757,8 +858,13 @@ static int __init iostat_init(void)
 	struct part_info      *tmp;
 	struct part_info      *info;
 	struct part_info      *part0_info;
-	size_t part_info_len;
+	size_t                 part_info_len;
+	unsigned long          iterator;
+	unsigned long          max_hlist;
 
+	max_hlist = MAX_HASH_LIST;
+	for(iterator = 0; iterator < max_hlist; ++iterator)
+		INIT_LIST_HEAD(proc_info_hlist + iterator);
 
 	INIT_LIST_HEAD(&part_info_list);
 	part_info_len = sizeof(struct part_info);
@@ -787,7 +893,6 @@ static int __init iostat_init(void)
 		if (get_capacity(disk) == 0 ||
 		    (disk->flags & GENHD_FL_SUPPRESS_PARTITION_INFO))
 			continue;
-
 		/*
 		 * Note, unlike /proc/partitions, I am showing the
 		 * numbers in hex - the same format as the root=
@@ -928,6 +1033,7 @@ static void __exit iostat_exit(void)
 	if(!list_empty(&part_info_list))
 		list_for_each_entry(tmp,&part_info_list,list)
 			kfree(tmp);
+	proc_info_free(proc_info_hlist,MAX_HASH_LIST);
 }
 
 module_init(iostat_init);

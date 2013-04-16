@@ -41,11 +41,15 @@
 #include<linux/hash.h>
 
 #define SHIFT         10
-#define IOS           0
-#define MERGES        1
-#define TICKS         2
-#define SECTORS       3
-#define PCACHE        4
+#define IOS           0x0000000000000001
+#define MERGES        0x0000000000000002
+#define TICKS         0x0000000000000004
+#define SECTORS       0x0000000000000008
+#define PCACHE        0x0000000000000010
+#define RIOS          0x0000000000000020
+#define RSECTORS      0x0000000000000040
+#define IO_TICKS      0x0000000000000080
+#define TIME_IN_QUEUE 0x0000000000000100
 #define MAX_HASH_LIST (1UL << SHIFT)
 
 static unsigned long  p_block_class               = 0;
@@ -55,6 +59,7 @@ static unsigned long  p_elv_bio_merged            = 0;
 static unsigned long  p_blk_finish_request        = 0;
 static unsigned long  p_elv_merge_requests        = 0;
 static unsigned long  p_get_request_wait          = 0;
+
 module_param(p_block_class,ulong,S_IRUGO);
 module_param(p_disk_type,ulong,S_IRUGO);
 module_param(p___do_page_cache_readahead,ulong,S_IRUGO);
@@ -72,7 +77,6 @@ struct proc_info {
 	unsigned long     merges[2];
 	unsigned long     ticks[2];
 	unsigned long     sectors[2];
-	unsigned long     pcache[2];
 };
 struct part_info {
 	struct list_head  list;
@@ -85,7 +89,7 @@ struct part_info {
 	unsigned long     f_sectors[2];
 	unsigned long     r_ios[2];
 	unsigned long     r_sectors[2];
-	unsigned long     p_count[3];
+	unsigned long     p_cache[3];
 	unsigned long     io_ticks;
 	unsigned long     time_in_queue;
 };
@@ -119,8 +123,8 @@ static ssize_t dk_iostat_show(struct kobject *kobj,
 			jiffies_to_msecs(tmp->time_in_queue),
 			tmp->r_ios[0],tmp->r_sectors[0],
 			tmp->r_ios[1],tmp->r_sectors[1],
-			tmp->p_count[0],tmp->p_count[1],
-			tmp->p_count[2]
+			tmp->p_cache[0],tmp->p_cache[1],
+			tmp->p_cache[2]
 			);
 		pos = buf + res;
 	}
@@ -166,9 +170,10 @@ static inline int blk_do_io_stat(struct request *rq)
 	        (rq->cmd_flags & REQ_DISCARD));
 }
 
-static struct hd_struct *mapping_to_part(const struct address_space *mapping)
+static inline struct hd_struct *mapping_to_part(const struct address_space *mapping)
 {
 	struct block_device  *bdev;
+
 	if(unlikely(mapping == NULL))
 		return NULL;
 	if(unlikely(mapping->host == NULL))
@@ -181,11 +186,73 @@ static struct hd_struct *mapping_to_part(const struct address_space *mapping)
 	return bdev->bd_part;
 }
 
+static inline struct part_info *list_for_part(const struct list_head *plist,
+				const struct hd_struct *part)
+{
+	struct part_info *info;
+
+	if(list_empty(plist))
+		return NULL;
+	list_for_each_entry(info,plist,list)
+	{
+		if(info->part == part)
+			return info;
+	}
+	return NULL;
+}
+
+static inline void __part_stat_acct(struct part_info *info,unsigned int rw,
+			unsigned long val, unsigned long flag)
+{
+	switch(flag)
+	{
+		case IOS:
+			info->f_ios[rw]     += val;
+			break;
+		case MERGES:
+			info->f_merges[rw]  += val;
+			break;
+		case TICKS:
+			info->f_ticks[rw]   += val;
+			break;
+		case SECTORS:
+			info->f_sectors[rw] += val;
+			break;
+		case RIOS:
+			info->r_ios[rw]     += val;
+			break;
+		case RSECTORS:
+			info->r_sectors[rw] += val;
+			break;
+		case PCACHE:
+			info->p_cache[rw]   += val;
+			break;
+		case IO_TICKS:
+			info->io_ticks      += val;
+			break;
+		case TIME_IN_QUEUE:
+			info->time_in_queue += val;
+			break;
+		default:
+			break;
+	}
+	return;
+}
+static void part_stat_acct(struct part_info *info, unsigned int rw,
+			unsigned long val, unsigned long flag)
+{
+	if(info->part0_info != NULL)
+		__part_stat_acct(info->part0_info,rw,val,flag);
+	__part_stat_acct(info,rw,val,flag);
+	return;
+}
+
 static void proc_info_free(struct list_head *list, unsigned long list_len)
 {
-	unsigned long i;
-	struct list_head *tmp;
-	struct proc_info *info;
+	unsigned long       i;
+	struct list_head    *tmp;
+	struct proc_info    *info;
+
 	for(i=0; i<list_len; ++i)
 	{
 		tmp = list+i;
@@ -194,14 +261,13 @@ static void proc_info_free(struct list_head *list, unsigned long list_len)
 			{
 #ifdef __SHOW__
 				printk("%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
-					"TR:%8lu TW:%8lu SR:%8lu SW:%8lu PT:%8lu PH:%8lu\n",
+					"TR:%8lu TW:%8lu SR:%8lu SW:%8lu \n",
 						info->pid,
 						info->comm,info->tgid,
 						info->ios[0],info->ios[1],
 						info->merges[0],info->merges[1],
 						info->ticks[0],info->ticks[1],
-						info->sectors[0],info->sectors[1],
-						info->pcache[0],info->pcache[1]
+						info->sectors[0],info->sectors[1]
 						);
 #endif
 				kfree(info);
@@ -226,27 +292,25 @@ static inline void copy_task_comm(char *dst, char *src)
 	return;
 }
 
-static void __proc_stat_acct(struct proc_info *info,unsigned int rw,
+static inline void __proc_stat_acct(struct proc_info *info,unsigned int rw,
 		unsigned long val,unsigned long flag)
 {
 	switch(flag)
 	{
 		case IOS:
-			info->ios[rw] += val;	
+			info->ios[rw]     += val;	
 			break;
 		case MERGES:
-			info->merges[rw] += val;
+			info->merges[rw]  += val;
 			break;
 		case TICKS:
-			info->ticks[rw] += val;
+			info->ticks[rw]   += val;
 			break;
 		case SECTORS:
 			info->sectors[rw] += val;
 			break;
-		case PCACHE:
-			info->pcache[rw] += val;
 		default:
-			break;
+			return;
 	}
 	copy_task_comm(info->comm,current->comm);
 	return;
@@ -264,7 +328,7 @@ static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 		{
 			if(info->tgid == tgid)
 			{
-				__proc_stat_acct(info,rw,1,flag);
+				__proc_stat_acct(info,rw,val,flag);
 				return;
 			}
 		}
@@ -292,28 +356,16 @@ static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 	mapping = (struct address_space *)(regs->di);
 	nr_pages = (unsigned int)(regs->si);
 #endif
-
-#ifdef __PAGE_CACHE_ACCT__
-	proc_stat_acct(proc_info_hlist,0,nr_pages,PCACHE);
-#endif
 	data = (struct find_get_pages_contig_data *)ri->data;
 	part = mapping_to_part(mapping);
-	list_for_each_entry(info,&part_info_list,list)
+	info = list_for_part(&part_info_list,part);
+	if(info != NULL)
 	{
-		if(info->part == part)
-			goto count;
-	}
-	goto out;
+		part_stat_acct(info,0,nr_pages,PCACHE);
+		data->info = info;
+		return 0;
+	}	
 
-count:
-	info->p_count[0] += nr_pages;
-	if(info->part0_info != NULL)
-	{
-		info->part0_info->p_count[0] += nr_pages;
-	}
-	data->info = info;
-	return 0;
-out:
 	data->info = NULL;
 	return 0;
 }
@@ -329,26 +381,15 @@ static int find_get_pages_contig_pos_ret_handler(struct kretprobe_instance *ri,
 #else
 	nr_pages = (unsigned int)(regs->ax);
 #endif
-
-#ifdef __PAGE_CACHE_ACCT__
-	proc_stat_acct(proc_info_hlist,1,nr_pages,PCACHE);
-#endif
 	data = (struct find_get_pages_contig_data *)ri->data;
-	if(data->info == NULL)
-		goto out;
-	else
-		goto count;
-	return 0;
-count:
-	info = data->info;
-	info->p_count[1] += nr_pages;
-	if(info->part0_info != NULL)
+	if(data->info != NULL)
 	{
-		info->part0_info->p_count[1] += nr_pages;
+		info = data->info;
+		part_stat_acct(info,1,nr_pages,PCACHE);
+		data->info = NULL;
+		return 0;
 	}
-	data->info = NULL;
-	return 0;
-out:
+
 	data->info = NULL;
 	return 0;
 }
@@ -366,28 +407,16 @@ static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 #else
 	mapping = (struct address_space *)(regs->di);
 #endif
-
-#ifdef __PAGE_CACHE_ACCT__
-	proc_stat_acct(proc_info_hlist,0,1,PCACHE);
-#endif
 	data = (struct find_get_page_data *)ri->data;
 	part = mapping_to_part(mapping);
-	list_for_each_entry(info,&part_info_list,list)
+	info = list_for_part(&part_info_list,part);
+	if(info != NULL)
 	{
-		if(info->part == part)
-			goto count;
+		part_stat_acct(info,0,1,PCACHE);
+		data->info = info;
+		return 0;
 	}
-	goto out;
 
-count:
-	++(info->p_count[0]);
-	if(info->part0_info != NULL)
-	{
-		++info->part0_info->p_count[0];
-	}
-	data->info = info;
-	return 0;
-out:
 	data->info = NULL;
 	return 0;
 }
@@ -405,26 +434,14 @@ static int find_get_page_pos_ret_handler(struct kretprobe_instance *ri,
 	page = (struct page *)(regs->ax);
 #endif
 	data = (struct find_get_page_data *)ri->data;
-	if(page == NULL)
-		goto out;
-#ifdef __PAGE_CACHE_ACCT__
-	proc_stat_acct(proc_info_hlist,1,1,PCACHE);
-#endif
-	if(data->info == NULL)
-		goto out;
-	else
-		goto count;
-	return 0;
-count:
-	info = data->info;
-	++(info->p_count[1]);
-	if(info->part0_info != NULL)
+	if(page != NULL && data->info != NULL)
 	{
-		++info->part0_info->p_count[1];
+		info = data->info;
+		part_stat_acct(info,1,1,PCACHE);
+		data->info = NULL;
+		return 0;
 	}
-	data->info = NULL;
-	return 0;
-out:
+
 	data->info = NULL;
 	return 0;
 }
@@ -447,21 +464,22 @@ static int submit_bio_pre_probe(struct kprobe *probe,
 	if(bio_has_data(bio) && !(rw & REQ_DISCARD))
 	{
 		bi_part = bio->bi_bdev->bd_part;
-		list_for_each_entry(info,&part_info_list,list)
+		info = list_for_part(&part_info_list,bi_part);
+		if(info != NULL)
 		{
-			if(info->part == bi_part)
-				goto count;
+			if(rw & WRITE)
+			{
+				part_stat_acct(info,1,1,RIOS);
+				part_stat_acct(info,1,bio_sectors(bio),RSECTORS);
+			}
+			else
+			{
+				part_stat_acct(info,0,1,RIOS);
+				part_stat_acct(info,0,bio_sectors(bio),RSECTORS);
+			}
 		}
 	}
-	return 0;
-count:
-	++info->r_ios[rw];
-	info->r_sectors[rw] += bio_sectors(bio);
-	if(info->part0_info != NULL)
-	{
-		++info->part0_info->r_ios[rw];
-		info->part0_info->r_sectors[rw] += bio_sectors(bio);
-	}
+
 	return 0;
 }
 
@@ -487,16 +505,13 @@ static int __do_page_cache_readahead_pre_ret_handler(struct kretprobe_instance *
 #endif
 	data = (struct __do_page_cache_readahead_data *)ri->data;
 	part = mapping_to_part(mapping);
-	list_for_each_entry(info,&part_info_list,list)
+	info = list_for_part(&part_info_list,part);
+	if(info != NULL)
 	{
-		if(info->part == part)
-		{
-			data->info = info;
-			return 0;
-		}
+		data->info = info;
+		return 0;
 	}
-	goto out;
-out:
+
 	data->info = NULL;
 	return 0;
 }
@@ -515,13 +530,9 @@ static int __do_page_cache_readahead_pos_ret_handler(struct kretprobe_instance *
 #endif
 	data = (struct __do_page_cache_readahead_data *)ri->data;
 	info = data->info;
-	if(info == NULL)
-		return 0;
-	info->p_count[2] += nr_pages;
-	if(info->part0_info != NULL)
-	{
-		info->part0_info->p_count[2] += nr_pages;
-	}
+	if(info != NULL)
+		part_stat_acct(info,2,nr_pages,PCACHE);
+
 	data->info = NULL;
 	return 0;
 }
@@ -545,21 +556,16 @@ static int elv_bio_merged_pre_handler(struct kprobe *probe,
 	rw = rq_data_dir(rq);
 	proc_stat_acct(proc_info_hlist,rw,1,MERGES);
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
-		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
-	else
-		return 0;
-	list_for_each_entry(info,&part_info_list,list)
 	{
-		if(info->part == part)
+		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
+		info = list_for_part(&part_info_list,part);
+		if(info != NULL)
 		{
-			++info->f_merges[rw];
-			if(info->part0_info != NULL)
-			{
-				++info->part0_info->f_merges[rw];
-			}
+			part_stat_acct(info,rw,1,MERGES);
 			return 0;
 		}
 	}
+
 	return 0;
 }
 static void elv_bio_merged_pos_handler(struct kprobe *probe,
@@ -585,39 +591,28 @@ static int blk_finish_request_pre_handler(struct kprobe *probe,
 	rq = (struct request *)(regs->di);
 #endif
 	rw   = rq_data_dir(rq);
+
 	duration = jiffies - rq->start_time;
 	proc_stat_acct(proc_info_hlist,rw,1,IOS);
 	proc_stat_acct(proc_info_hlist,rw,duration,TICKS);
+	
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
+	{
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
-	else
-		return 0;
-	list_for_each_entry(info,&part_info_list,list)
-	{
-		if(info->part == part)
-			goto count;
-	}
-	return 0;
-
-count:
-	++info->f_ios[rw];
-	info->f_ticks[rw]   += duration;
-	if(info->part0_info != NULL)
-	{
-		++info->part0_info->f_ios[rw];
-		info->part0_info->f_ticks[rw]   += duration;
-	}
-
-	/* blk_account_io_done */
-	if(part_in_flight(part))
-	{
-		now = jiffies;
-		info->io_ticks      += now - part->stamp;
-		info->time_in_queue += part_in_flight(part) * (now - part->stamp);
-		if(info->part0_info != NULL)
+		info = list_for_part(&part_info_list,part);
+		if(info != NULL)
 		{
-			info->part0_info->io_ticks      += now - part->stamp;
-			info->part0_info->time_in_queue += part_in_flight(part) * (now - part->stamp);
+			part_stat_acct(info,rw,1,IOS);
+			part_stat_acct(info,rw,duration,TICKS);
+			/* blk_account_io_done */
+			if(part_in_flight(part))
+			{
+				now      = jiffies;
+				duration = now - part->stamp;
+				part_stat_acct(info,0,duration,IO_TICKS);
+				duration = part_in_flight(part)*(now - part->stamp);
+				part_stat_acct(info,0,duration,TIME_IN_QUEUE);
+			}
 		}
 	}
 	return 0;
@@ -650,21 +645,14 @@ static int blk_update_request_pre_handler(struct kprobe *probe,
 	proc_stat_acct(proc_info_hlist,rw,bytes >> 9,SECTORS);
 
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
+	{
 		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
-	else
-		return 0;
-	list_for_each_entry(info,&part_info_list,list)
-	{
-		if(info->part == part)
-			goto count;
-	}
-	return 0;
-
-count:
-	info->f_sectors[rw] += bytes >> 9;
-	if(info->part0_info != NULL)
-	{
-		info->part0_info->f_sectors[rw] += bytes >> 9;
+		info = list_for_part(&part_info_list,part);
+		if(info != NULL)
+		{
+			part_stat_acct(info,rw,bytes >> 9,SECTORS);
+			return 0;
+		}
 	}
 	return 0;
 }
@@ -688,18 +676,17 @@ static int elv_merge_requests_pre_ret_handler(struct kretprobe_instance *ri,
 #endif
 	data = (struct elv_merge_requests_data *)ri->data;
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
-		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
-	else
-		return 0;
-	list_for_each_entry(info,&part_info_list,list)
 	{
-		if(info->part == part)
+		part = disk_map_sector_rcu(rq->rq_disk, blk_rq_pos(rq));
+		info = list_for_part(&part_info_list,part);
+		if(info != NULL)
 		{
 			data->part = part;
 			data->info = info;
 			return 0;
 		}
 	}
+
 	data->part = NULL;
 	data->info = NULL;
 	return 0;
@@ -708,23 +695,22 @@ static int elv_merge_requests_pre_ret_handler(struct kretprobe_instance *ri,
 static int elv_merge_requests_pos_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
-	unsigned long    now;
-	struct part_info *info;
-	struct hd_struct *part;
+	unsigned long      now;
+	unsigned long      duration;
+	struct part_info   *info;
+	struct hd_struct   *part;
+
 	info = ((struct elv_merge_requests_data *)ri->data)->info;
 	part = ((struct elv_merge_requests_data *)ri->data)->part;
 	if(info == NULL || part == NULL)
 		return 0;
 	if(part_in_flight(part))
 	{
-		now = jiffies;
-		info->io_ticks      += now - part->stamp;
-		info->time_in_queue += part_in_flight(part) * (now - part->stamp);
-		if(info->part0_info != NULL)
-		{
-			info->part0_info->io_ticks      += now - part->stamp;
-			info->part0_info->time_in_queue += part_in_flight(part) * (now - part->stamp);
-		}
+		now      = jiffies;
+		duration = now - part->stamp;
+		part_stat_acct(info,0,duration,IO_TICKS);
+		duration = part_in_flight(part) * (now - part->stamp);
+		part_stat_acct(info,0,duration,TIME_IN_QUEUE);
 	}
 	return 0;
 }
@@ -748,6 +734,7 @@ static int get_request_wait_pos_ret_handler(struct kretprobe_instance *ri,
 {
 	sector_t                     sector;
 	unsigned long                now;
+	unsigned long                duration;
 	struct part_info             *info;
 	struct hd_struct             *part;
 	struct gendisk               *disk;
@@ -760,23 +747,16 @@ static int get_request_wait_pos_ret_handler(struct kretprobe_instance *ri,
 	if(disk == NULL || sector)
 		return 0;
 	part = disk_map_sector_rcu(disk, sector);
-	list_for_each_entry(info,&part_info_list,list)
+	info = list_for_part(&part_info_list,part);
+	if(info != NULL)
 	{
-		if(info->part == part)
-			goto count;
-	}
-	return 0;
-
-count:
-	if(part_in_flight(part))
-	{
-		now = jiffies;
-		info->io_ticks      += now - part->stamp;
-		info->time_in_queue += part_in_flight(part) * (now - part->stamp);
-		if(info->part0_info != NULL)
+		if(part_in_flight(part))
 		{
-			info->part0_info->io_ticks      += now - part->stamp;
-			info->part0_info->time_in_queue += part_in_flight(part) * (now - part->stamp);
+			now      = jiffies;
+			duration = now - part->stamp;
+			part_stat_acct(info,0,duration,IO_TICKS);
+			duration = part_in_flight(part) * (now - part->stamp);
+			part_stat_acct(info,0,duration,TIME_IN_QUEUE);
 		}
 	}
 	return 0;
@@ -909,6 +889,8 @@ static int __init iostat_init(void)
 		}
 		disk_part_iter_exit(&piter);
 	}
+	if(list_empty(&part_info_list))
+		return 0;
 
 	list_for_each_entry(info,&part_info_list,list)
 	{

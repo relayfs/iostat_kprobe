@@ -136,8 +136,48 @@ static ssize_t dk_iostat_show(struct kobject *kobj,
 static struct kobj_attribute dk_iostat_attribute =
 	__ATTR(dk_iostat,0444,dk_iostat_show,NULL);
 
+static ssize_t proc_iostat_show(struct kobject *kobj,
+			struct kobj_attribute *attr,char *buf)
+{
+	char              *pos;
+	int               res;
+	int               acct;
+	struct list_head  *hlist;
+	struct list_head  *tmp;
+	struct proc_info  *info;
+
+	pos = buf;
+	res = 0;
+	hlist = proc_info_hlist;
+	for(acct=0;acct<MAX_HASH_LIST;++acct)
+	{
+		tmp = hlist + acct;
+		if(!list_empty(tmp))
+			list_for_each_entry(info,tmp,list)
+			{
+				res += sprintf(pos,"%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
+					"SR:%8lu SW:%8lu PA:%8lu PH:%8lu PR:%8lu\n",
+						info->pid,
+						info->comm,info->tgid,
+						info->ios[0],info->ios[1],
+						info->merges[0],info->merges[1],
+						info->sectors[0],info->sectors[1],
+						info->pcache[0],info->pcache[1],
+						info->pcache[2]
+						);
+				pos = buf + res;
+			}
+
+	}
+	return res;
+}
+
+static struct kobj_attribute proc_iostat_attribute =
+	__ATTR(proc_iostat,0444,proc_iostat_show,NULL);
+
 static struct attribute *attrs[] = {
 	&dk_iostat_attribute.attr,
+	&proc_iostat_attribute.attr,
 	NULL,
 };
 

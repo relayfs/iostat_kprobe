@@ -75,8 +75,10 @@ struct proc_info {
 	pid_t             tgid;
 	unsigned long     ios[2];
 	unsigned long     merges[2];
+	/* useless */
 	unsigned long     ticks[2];
 	unsigned long     sectors[2];
+	unsigned long     pcache[3];
 };
 struct part_info {
 	struct list_head  list;
@@ -272,13 +274,14 @@ static void proc_info_free(struct list_head *list, unsigned long list_len)
 			{
 #ifdef __SHOW__
 				printk("%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
-					"TR:%8lu TW:%8lu SR:%8lu SW:%8lu \n",
+					"SR:%8lu SW:%8lu PA:%8lu PH:%8lu PR:%8lu\n",
 						info->pid,
 						info->comm,info->tgid,
 						info->ios[0],info->ios[1],
 						info->merges[0],info->merges[1],
-						info->ticks[0],info->ticks[1],
-						info->sectors[0],info->sectors[1]
+						info->sectors[0],info->sectors[1],
+						info->pcache[0],info->pcache[1],
+						info->pcache[2]
 						);
 #endif
 				kfree(info);
@@ -325,6 +328,9 @@ static inline void __proc_stat_acct(struct proc_info *info,unsigned int rw,
 			break;
 		case SECTORS:
 			info->sectors[rw] += val;
+			break;
+		case PCACHE:
+			info->pcache[rw]  += val;
 			break;
 		default:
 			return;
@@ -388,6 +394,7 @@ static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 	info = list_for_part(&part_info_list,part);
 	if(info != NULL)
 	{
+		proc_stat_acct(proc_info_hlist,0,nr_pages,PCACHE);
 		part_stat_acct(info,0,nr_pages,PCACHE);
 		data->info = info;
 		return 0;
@@ -411,6 +418,7 @@ static int find_get_pages_contig_pos_ret_handler(struct kretprobe_instance *ri,
 	data = (struct find_get_pages_contig_data *)ri->data;
 	if(data->info != NULL)
 	{
+		proc_stat_acct(proc_info_hlist,1,nr_pages,PCACHE);
 		info = data->info;
 		part_stat_acct(info,1,nr_pages,PCACHE);
 		data->info = NULL;
@@ -439,6 +447,7 @@ static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 	info = list_for_part(&part_info_list,part);
 	if(info != NULL)
 	{
+		proc_stat_acct(proc_info_hlist,0,1,PCACHE);
 		part_stat_acct(info,0,1,PCACHE);
 		data->info = info;
 		return 0;
@@ -463,6 +472,7 @@ static int find_get_page_pos_ret_handler(struct kretprobe_instance *ri,
 	data = (struct find_get_page_data *)ri->data;
 	if(page != NULL && data->info != NULL)
 	{
+		proc_stat_acct(proc_info_hlist,1,1,PCACHE);
 		info = data->info;
 		part_stat_acct(info,1,1,PCACHE);
 		data->info = NULL;
@@ -496,11 +506,15 @@ static int submit_bio_pre_probe(struct kprobe *probe,
 		{
 			if(rw & WRITE)
 			{
+				proc_stat_acct(proc_info_hlist,1,1,IOS);
+				proc_stat_acct(proc_info_hlist,1,bio_sectors(bio),SECTORS);
 				part_stat_acct(info,1,1,RIOS);
 				part_stat_acct(info,1,bio_sectors(bio),RSECTORS);
 			}
 			else
 			{
+				proc_stat_acct(proc_info_hlist,0,1,IOS);
+				proc_stat_acct(proc_info_hlist,0,bio_sectors(bio),SECTORS);
 				part_stat_acct(info,0,1,RIOS);
 				part_stat_acct(info,0,bio_sectors(bio),RSECTORS);
 			}
@@ -558,7 +572,10 @@ static int __do_page_cache_readahead_pos_ret_handler(struct kretprobe_instance *
 	data = (struct __do_page_cache_readahead_data *)ri->data;
 	info = data->info;
 	if(info != NULL)
+	{
+		proc_stat_acct(proc_info_hlist,2,nr_pages,PCACHE);
 		part_stat_acct(info,2,nr_pages,PCACHE);
+	}
 
 	data->info = NULL;
 	return 0;
@@ -620,8 +637,6 @@ static int blk_finish_request_pre_handler(struct kprobe *probe,
 	rw   = rq_data_dir(rq);
 
 	duration = jiffies - rq->start_time;
-	proc_stat_acct(proc_info_hlist,rw,1,IOS);
-	proc_stat_acct(proc_info_hlist,rw,duration,TICKS);
 	
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 	{
@@ -669,7 +684,6 @@ static int blk_update_request_pre_handler(struct kprobe *probe,
 	if(!rq->bio)
 		return 0;
 	rw   = rq_data_dir(rq);
-	proc_stat_acct(proc_info_hlist,rw,bytes >> 9,SECTORS);
 
 	if(blk_do_io_stat(rq) && !(rq->cmd_flags & REQ_FLUSH))
 	{

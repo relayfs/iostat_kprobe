@@ -186,6 +186,16 @@ static inline struct hd_struct *mapping_to_part(const struct address_space *mapp
 	return bdev->bd_part;
 }
 
+static void part_info_free(struct list_head *plist)
+{
+	struct part_info   *tmp;
+	
+	if(!list_empty(plist))
+		list_for_each_entry(tmp,plist,list)
+			kfree(tmp);
+	return;
+}
+
 static inline struct part_info *list_for_part(const struct list_head *plist,
 				const struct hd_struct *part)
 {
@@ -247,6 +257,7 @@ static void part_stat_acct(struct part_info *info, unsigned int rw,
 	return;
 }
 
+#ifdef __PROC_INFO_ACCT__
 static void proc_info_free(struct list_head *list, unsigned long list_len)
 {
 	unsigned long       i;
@@ -275,6 +286,12 @@ static void proc_info_free(struct list_head *list, unsigned long list_len)
 	}
 	return;
 }
+#else
+static void proc_info_free(struct list_head *list, unsigned long list_len)
+{
+	return;
+}
+#endif
 
 static inline void init_proc_info(struct proc_info *info)
 {
@@ -315,6 +332,8 @@ static inline void __proc_stat_acct(struct proc_info *info,unsigned int rw,
 	copy_task_comm(info->comm,current->comm);
 	return;
 }
+
+#ifdef __PROC_INFO_ACCT__
 static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 		unsigned long val,unsigned long flag)
 {
@@ -339,6 +358,14 @@ static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 	list_add_tail(&info->list,&hash_list[tmp]);
 	__proc_stat_acct(info,rw,val,flag);
 }
+#else
+static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
+		unsigned long val,unsigned long flag)
+{
+	return;
+}
+#endif
+
 
 /* 查找连续的页面缓存 */
 static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
@@ -1001,7 +1028,6 @@ static int __init iostat_init(void)
 
 static void __exit iostat_exit(void)
 {
-	struct part_info *tmp;
 	kobject_put(dk_iostat_kobj);
 	unregister_kprobe(&submit_bio_probe);
 	unregister_kretprobe(&find_get_page_ret_probe);
@@ -1012,9 +1038,7 @@ static void __exit iostat_exit(void)
 	unregister_kprobe(&blk_update_request_probe);
 	unregister_kretprobe(&elv_merge_requests_ret_probe);
 	unregister_kretprobe(&get_request_wait_ret_probe);
-	if(!list_empty(&part_info_list))
-		list_for_each_entry(tmp,&part_info_list,list)
-			kfree(tmp);
+	part_info_free(&part_info_list);
 	proc_info_free(proc_info_hlist,MAX_HASH_LIST);
 }
 

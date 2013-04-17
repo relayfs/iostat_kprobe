@@ -4,7 +4,7 @@ obj-m := iostat_kprobe.o
 
 KDIR := /lib/modules/$(shell uname -r)/build/
 PWD  := $(shell pwd)
-CC =  gcc -g -D __DEBUG__ -D __PROC_INFO_ACCT__ 
+CC =  gcc -g -D __DEBUG__
 all:
 	make -C $(KDIR) M=$(PWD) modules
 clean:

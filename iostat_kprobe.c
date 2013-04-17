@@ -78,6 +78,7 @@ struct proc_info {
 	/* useless */
 	unsigned long     ticks[2];
 	unsigned long     sectors[2];
+	/* pcache[2] useless */
 	unsigned long     pcache[3];
 };
 struct part_info {
@@ -111,7 +112,7 @@ static ssize_t dk_iostat_show(struct kobject *kobj,
 	{
 		res += sprintf(pos,"%4d %4d %s %lu %lu %lu "
 			"%u %lu %lu %lu %u %u %u "
-			"%lu %lu %lu %lu %lu %lu %lu\n",
+			"%lu %lu %lu %lu %lu %lu %lu \n",
 			MAJOR(part_devt(tmp->part)),
 			MINOR(part_devt(tmp->part)),
 			disk_name(tmp->disk, tmp->part->partno, name_buf),
@@ -156,7 +157,7 @@ static ssize_t proc_iostat_show(struct kobject *kobj,
 			list_for_each_entry(info,tmp,list)
 			{
 				res += sprintf(pos,"%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
-					"SR:%8lu SW:%8lu PA:%8lu PH:%8lu PR:%8lu\n",
+						"SR:%8lu SW:%8lu PA:%8lu PH:%8lu PR:%8lu \n",
 						info->pid,
 						info->comm,info->tgid,
 						info->ios[0],info->ios[1],
@@ -169,6 +170,8 @@ static ssize_t proc_iostat_show(struct kobject *kobj,
 			}
 
 	}
+	if(res >> 12 != 0)
+		return 4098;
 	return res;
 }
 
@@ -314,14 +317,13 @@ static void proc_info_free(struct list_head *list, unsigned long list_len)
 			{
 #ifdef __SHOW__
 				printk("%8d %16s(%8d):R:%8lu W:%8lu MR:%8lu MW:%8lu "
-					"SR:%8lu SW:%8lu PA:%8lu PH:%8lu PR:%8lu\n",
+					"SR:%8lu SW:%8lu PA:%8lu PH:%8lu \n",
 						info->pid,
 						info->comm,info->tgid,
 						info->ios[0],info->ios[1],
 						info->merges[0],info->merges[1],
 						info->sectors[0],info->sectors[1],
-						info->pcache[0],info->pcache[1],
-						info->pcache[2]
+						info->pcache[0],info->pcache[1]
 						);
 #endif
 				kfree(info);
@@ -613,7 +615,6 @@ static int __do_page_cache_readahead_pos_ret_handler(struct kretprobe_instance *
 	info = data->info;
 	if(info != NULL)
 	{
-		proc_stat_acct(proc_info_hlist,2,nr_pages,PCACHE);
 		part_stat_acct(info,2,nr_pages,PCACHE);
 	}
 

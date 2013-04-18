@@ -11,5 +11,7 @@ clean:
 	make -C $(KDIR) M=$(PWD) clean && rm -rf Module.*
 	
 FLAG := -D __DIRECT_SHOW__ -D __FILE_STORE__
-proc:
+proc: 
 	gcc -g -Wall $(FLAG) iostat_proc.c
+delay: 
+	gcc -g -Wall $(FLAG) iostat_proc_delay.c

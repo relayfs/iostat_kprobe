@@ -2,7 +2,7 @@
 
 while test -e /sys/kernel/dk_iostat/dk_iostat
 do
-	date >> log
-	cat /sys/kernel/dk_iostat/dk_iostat >> log
+	date >> iostats
+	cat /sys/kernel/dk_iostat/dk_iostat >> iostats
 	sleep 180
 done

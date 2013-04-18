@@ -17,7 +17,7 @@ plot  "sda" using 1:2 w l lw 2 t "rd/s",\
 unset output
 reset
 
-set   term gif size 2560,1024
+set   term gif size 1280,512
 set   output "request_size.gif"
 set   ytics nomirror
 set   xtics nomirror
@@ -32,7 +32,7 @@ plot  "sda" using 1:12 w l lw 2 t "rd_sz",\
 unset output
 reset
 
-set   term gif size 2560,1024
+set   term gif size 1280,512
 set   output "request_iowait.gif"
 set   ytics nomirror
 set   xtics nomirror
@@ -42,7 +42,7 @@ plot  "sda" using 1:15 w l lw 2 t "iowait"
 unset output
 reset
 
-set   term gif size 2560,1024
+set   term gif size 1280,512
 set   output "request_rate.gif"
 set   ytics nomirror
 set   xtics nomirror
@@ -55,3 +55,13 @@ plot  "sda" using 1:14 w l lw 2 t "hrate",\
       "sda" using 1:17 w l lw 2 t "util"
 unset output
 reset 
+
+set   term gif size 1280,512
+set   output "request_svctm.gif"
+set   ytics nomirror
+set   xtics nomirror
+set   grid x
+set   grid y
+plot  "sda" using 1:16 w l lw 2 t "svctm"
+unset output
+reset

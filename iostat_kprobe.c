@@ -325,18 +325,18 @@ static void proc_info_free(struct list_head *list, unsigned long list_len)
 						info->sectors[0],info->sectors[1],
 						info->pcache[0],info->pcache[1]
 						);
-#endif
+#endif  /* __SHOW__ */
 				kfree(info);
 			}
 	}
 	return;
 }
-#else
+#else  /* __PROC_INFO_ACCT__ */
 static void proc_info_free(struct list_head *list, unsigned long list_len)
 {
 	return;
 }
-#endif
+#endif  /* __PROC_INFO_ACCT__ */
 
 static inline void init_proc_info(struct proc_info *info)
 {
@@ -406,16 +406,15 @@ static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 	list_add_tail(&info->list,&hash_list[tmp]);
 	__proc_stat_acct(info,rw,val,flag);
 }
-#else
+#else  /*__PROC_INFO_ACCT__*/
 static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 		unsigned long val,unsigned long flag)
 {
 	return;
 }
-#endif
+#endif  /*__PROC_INFO_ACCT__*/
 
-
-/* ²éÕÒÁ¬ĞøµÄÒ³Ãæ»º´æ */
+/* æŸ¥æ‰¾è¿ç»­çš„é¡µé¢ç¼“å­˜ */
 static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -471,7 +470,7 @@ static int find_get_pages_contig_pos_ret_handler(struct kretprobe_instance *ri,
 	return 0;
 }
 
-/* ²éÕÒµ¥¸öÒ³Ãæ»º´æ */
+/* æŸ¥æ‰¾å•ä¸ªé¡µé¢ç¼“å­˜ */
 static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -525,7 +524,7 @@ static int find_get_page_pos_ret_handler(struct kretprobe_instance *ri,
 	return 0;
 }
 
-/* Ìá½»bioº¯Êı£¬ÓÃÀ´Í³¼ÆbioÌá½»´ÎÊıºÍÉÈÇøÊı */
+/* æäº¤bioå‡½æ•°ï¼Œç”¨æ¥ç»Ÿè®¡bioæäº¤æ¬¡æ•°å’Œæ‰‡åŒºæ•° */
 static int submit_bio_pre_probe(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -572,7 +571,7 @@ static void submit_bio_post_probe(struct kprobe *probe,
 	return;
 }
 
-/* ÎÄ¼şÔ¤¶Áº¯Êı£¬ÓÃÀ´Í³¼ÆÔ¤¶ÁÒ³Êı */
+/* æ–‡ä»¶é¢„è¯»å‡½æ•°ï¼Œç”¨æ¥ç»Ÿè®¡é¢„è¯»é¡µæ•° */
 static int __do_page_cache_readahead_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -622,7 +621,7 @@ static int __do_page_cache_readahead_pos_ret_handler(struct kretprobe_instance *
 	return 0;
 }
 
-/* bioºÏ²¢º¯Êı£¬ÓÃÀ´Í³¼ÆbioºÏ²¢´ÎÊı */
+/* bioåˆå¹¶å‡½æ•°ï¼Œç”¨æ¥ç»Ÿè®¡bioåˆå¹¶æ¬¡æ•° */
 static int elv_bio_merged_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -659,8 +658,8 @@ static void elv_bio_merged_pos_handler(struct kprobe *probe,
 	return;
 }
 
-/* IOÇëÇóÍê³ÉÊ±µ÷ÓÃ£¬ÓÃÀ´Í³¼ÆIOÍê³ÉÊıºÍËùÓÃµÄÊ±¼ä */
-/* Íê³ÉÊ±ÇëÇó¶ÓÁĞÖĞÊ£ÓàÊıÄ¿·¢Éú±ä»¯£¬Òò´ËÍ³¼ÆÒ»´ÎµÈ´ıÊ±¼ä */
+/* IOè¯·æ±‚å®Œæˆæ—¶è°ƒç”¨ï¼Œç”¨æ¥ç»Ÿè®¡IOå®Œæˆæ•°å’Œæ‰€ç”¨çš„æ—¶é—´ */
+/* å®Œæˆæ—¶è¯·æ±‚é˜Ÿåˆ—ä¸­å‰©ä½™æ•°ç›®å‘ç”Ÿå˜åŒ–ï¼Œå› æ­¤ç»Ÿè®¡ä¸€æ¬¡ç­‰å¾…æ—¶é—´ */
 static int blk_finish_request_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -706,7 +705,7 @@ static void blk_finish_request_pos_handler(struct kprobe *probe,
 	return;
 }
 
-/* Í³¼ÆIOÍê³ÉµÄÉÈÇøÊı */
+/* ç»Ÿè®¡IOå®Œæˆçš„æ‰‡åŒºæ•° */
 static int blk_update_request_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {

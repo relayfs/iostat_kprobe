@@ -12,6 +12,7 @@
  * Organization:  chinanetcenter
  */
 
+
 #include<stdio.h>
 #include<unistd.h>
 #include<string.h>
@@ -27,6 +28,7 @@
 #define MAX_NAMELEN   72
 #define MAX_BUFLEN    256
 #define MAX_DEV       16
+#define MAX_TIME      480
 
 #define S_VAL(m,n,p)  (((double) ((n) - (m))) /(p))
 
@@ -69,6 +71,8 @@ void cal_part_info(int curr)
 	FILE    *tmp;
 	double  await;
 	double  nr_ios;
+	double  rd_nr_ios;
+	double  wt_nr_ios;
 	double  util;
 	double  svctm;
 	double  rd_sz;
@@ -80,15 +84,16 @@ void cal_part_info(int curr)
 		pos = &info[i][curr];
 		pre = &info[i][!curr];
 
-		nr_ios = (pos->f_ios[0]-pre->f_ios[0])+
-			(pos->f_ios[1]-pre->f_ios[1]);
+		rd_nr_ios = (pos->f_ios[0]-pre->f_ios[0]);
+		wt_nr_ios = (pos->f_ios[1]-pre->f_ios[1]);
+		nr_ios = rd_nr_ios + wt_nr_ios;
 		await  = nr_ios ? ((pos->ticks[0]-pre->ticks[0])+
 			(pos->ticks[1]-pre->ticks[1]))/nr_ios : 0.0;
 		util   = S_VAL(pre->io_ticks,pos->io_ticks,itv*10);
 		svctm  = nr_ios ? ((pos->io_ticks-pre->io_ticks)/nr_ios) : 0.0;
 
-		rd_sz  = nr_ios ? (pos->f_sec[0]-pre->f_sec[0])/nr_ios : 0.0;
-		wt_sz  = nr_ios ? (pos->f_sec[1]-pre->f_sec[1])/nr_ios : 0.0;
+		rd_sz  = rd_nr_ios ? (pos->f_sec[0]-pre->f_sec[0])/rd_nr_ios : 0.0;
+		wt_sz  = wt_nr_ios ? (pos->f_sec[1]-pre->f_sec[1])/wt_nr_ios : 0.0;
 		
 		nr_cache[0] = (double)(pos->p_count[0]-pre->p_count[0]);
 		nr_cache[1] = (double)(pos->p_count[1]-pre->p_count[1]);
@@ -112,6 +117,8 @@ void cal_part_info(int curr)
 		fclose(tmp);
 	}
 	++seq;
+	if(seq > MAX_TIME)
+		seq = 0;
 }
 int get_part_info(FILE *file,const int curr)
 {

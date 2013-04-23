@@ -26,7 +26,7 @@
 #include<sys/types.h>
 #include<sys/stat.h>
 
-#define MAX_NAMELEN 72
+#define MAX_NAMELEN  72
 #define MAX_BUFLEN   256
 #define MAX_DEV      16
 #define SUCCESS      1
@@ -52,61 +52,57 @@ struct part_info {
 #pragma pack()
 const char file_path[] = "/sys/kernel/dk_iostat/";
 const char file_name[] = "dk_iostat";
-const char result_path[] = "/home/cl/";
-const char result_name[] = "iostats";
 const char init_format[] = "%u%u%s";
-const char full_format[] = "%u%u%s%lu%lu%lu%lu%lu%lu%lu\
-			    %lu%lu%lu%lu%lu%lu%lu%lu%lu";
-const char show_format[] = "%8s%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f%8.2f\n";
+const char full_format[] = "%u%u%s%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu";
+const char show_format[] = "%8s %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n";
+const char show_title[]  = "     dev     rd/s    rds/s    rdm/s    rdq/s   rdqs/s     wt/s    wts/s    wtm/s    wtq/s   wtqs/s    rd_sz    wt_sz   h_rate    await    svctm     util\n";
 
 struct part_info info[MAX_DEV][2];
 
-int dev_count;
-int res_count;
+int dev_acct;
 int curr;
-long  itv;
+int itv;
+int res_acct;
 
-void show_part_info()
+void cal_part_info()
 {
-	int i;
-	struct part_info *pre;
-	struct part_info *pos;
+	struct part_info  *pre;
+	struct part_info  *pos;
+	
+	int     i;
+	double  await;
+	double  nr_ios;
+	double  rd_nr_ios;
+	double  wt_nr_ios;
+	double  util;
+	double  svctm;
+	double  rd_sz;
+	double  wt_sz;
+	double  nr_cache[2];
+	double  hitrate;
 
-	double await;
-	double nr_ios;
-	double util;
-	double svctm;
-	double rd_sz;
-	double wt_sz;
-	double nr_count[2];
-	double hit_rate;
-	fprintf(stdout,"     dev     rd/s    rds/s    rdm/s    rdq/s   rdqs/s"
-			"     wt/s    wts/s    wtm/s    wtq/s   wtqs/s"
-			"    rd_sz    wt_sz   h_rate    await    svctm     util\n");
-
-	for(i=0;i<dev_count;++i)
+	fprintf(stdout,show_title);
+	for(i=0; i<dev_acct; ++i)
 	{
-		pre = &info[i][!curr];
 		pos = &info[i][curr];
+		pre = &info[i][!curr];
 
-		nr_ios = (pos->f_ios[0]-pre->f_ios[0])+
-			(pos->f_ios[1]-pre->f_ios[1]);
+		rd_nr_ios = (pos->f_ios[0]-pre->f_ios[0]);
+		wt_nr_ios = (pos->f_ios[1]-pre->f_ios[1]);
+		nr_ios = rd_nr_ios + wt_nr_ios;
 		await  = nr_ios ? ((pos->ticks[0]-pre->ticks[0])+
 			(pos->ticks[1]-pre->ticks[1]))/nr_ios : 0.0;
 		util   = S_VAL(pre->io_ticks,pos->io_ticks,itv*10);
 		svctm  = nr_ios ? ((pos->io_ticks-pre->io_ticks)/nr_ios) : 0.0;
 
-		rd_sz  = nr_ios ? (pos->f_sec[0]-pre->f_sec[0])/nr_ios : 0.0;
-		wt_sz  = nr_ios ? (pos->f_sec[1]-pre->f_sec[1])/nr_ios : 0.0;
+		rd_sz  = rd_nr_ios ? (pos->f_sec[0]-pre->f_sec[0])/rd_nr_ios : 0.0;
+		wt_sz  = wt_nr_ios ? (pos->f_sec[1]-pre->f_sec[1])/wt_nr_ios : 0.0;
 		
-		nr_count[0] = (double)(pos->p_count[0]-pre->p_count[0]);
-		nr_count[1] = (double)(pos->p_count[1]-pre->p_count[1]);
-		hit_rate    = nr_count[0] ? nr_count[1]*100/nr_count[0] : 100.0;
-#ifdef __DIRECT_SHOW__
-		fprintf(stdout,	"%8s %8.2f %8.2f %8.2f %8.2f %8.2f "
-				"%8.2f %8.2f %8.2f %8.2f %8.2f "
-				"%8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n",
-				pre->dev_name,
+		nr_cache[0] = (double)(pos->p_count[0]-pre->p_count[0]);
+		nr_cache[1] = (double)(pos->p_count[1]-pre->p_count[1]);
+		hitrate     = nr_cache[0] ? nr_cache[1]*100/nr_cache[0] : 0.0;
+
+		fprintf(stdout,show_format,pre->dev_name,
 			S_VAL(pre->f_ios[0],pos->f_ios[0],itv),
 			S_VAL(pre->f_sec[0],pos->f_sec[0],itv),
 			S_VAL(pre->merges[0],pos->merges[0],itv),
@@ -119,133 +115,39 @@ void show_part_info()
 			S_VAL(pre->r_ios[1],pos->r_ios[1],itv),
 			S_VAL(pre->r_sec[1],pos->r_sec[1],itv),
 
-			rd_sz,wt_sz,hit_rate,await,svctm,util);
-#endif
-#ifdef __FILE_STORE__
-		
-		FILE *tmp;
-		tmp = fopen(pre->dev_name,"a");
-		fprintf(tmp,"%8s %8.2f %8.2f %8.2f %8.2f %8.2f "
-				"%8.2f %8.2f %8.2f %8.2f %8.2f "
-				"%8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n",
-				pre->dev_name,
-			S_VAL(pre->f_ios[0],pos->f_ios[0],itv),
-			S_VAL(pre->f_sec[0],pos->f_sec[0],itv),
-			S_VAL(pre->merges[0],pos->merges[0],itv),
-			S_VAL(pre->r_ios[0],pos->r_ios[0],itv),
-			S_VAL(pre->r_sec[0],pos->r_sec[0],itv),
-
-			S_VAL(pre->f_ios[1],pos->f_ios[1],itv),
-			S_VAL(pre->f_sec[1],pos->f_sec[1],itv),
-			S_VAL(pre->merges[1],pos->merges[1],itv),
-			S_VAL(pre->r_ios[1],pos->r_ios[1],itv),
-			S_VAL(pre->r_sec[1],pos->r_sec[1],itv),
-
-			rd_sz,wt_sz,hit_rate,await,svctm,util);
-		fclose(tmp);
-#endif
+			rd_sz,wt_sz,hitrate,await,svctm,util);
 	}
-	return;
 }
 
-void init_part_info(const char *file)
+void get_part_info(const char *name,const int curr)
 {
-	FILE *ptr;
-	int  res;
-	int  major;
-	int  minor;
-	char dev_name[MAX_NAMELEN];
-	char buf[MAX_BUFLEN];
-
+	int   i;
+	int   res;
+	int   major;
+	int   minor;
+	FILE  *file;
+	char  buf[MAX_BUFLEN];
+	char  dev_name[MAX_NAMELEN];
 	struct part_info *tmp;
 
+	tmp = NULL;
 	memset(dev_name,0,MAX_NAMELEN);
 	memset(buf,0,MAX_BUFLEN);
-	tmp  = NULL;
-	curr = 0;
+	
+	file = fopen(name,"r"); 
 
-	ptr = fopen(file,"r");
-	if(ptr == NULL)
+	for(i=0; (i<dev_acct)&&(fgets(buf,MAX_BUFLEN,file)!=NULL); ++i)
 	{
-		fprintf(stderr,"%s:%d %s\n",file,errno,strerror(errno));
-		return;
-	}
-
-	dev_count = 0;
-	while(fgets(buf,MAX_BUFLEN,ptr) != NULL)
-	{
-		res = sscanf(buf,init_format,&major,&minor,dev_name);
+		res = sscanf(buf, init_format, &major, &minor, dev_name);
 		if(res != 3)
 		{
-			fprintf(stderr,"format wrong!\n");
-			return;
-		}
-		tmp = &info[dev_count][curr];
-		tmp->major = major;
-		tmp->minor = minor;
-		memcpy(tmp->dev_name,dev_name,MAX_NAMELEN);
-		tmp = &info[dev_count][!curr];
-		tmp->major = major;
-		tmp->minor = minor;
-		memcpy(tmp->dev_name,dev_name,MAX_NAMELEN);
-		dev_count++;
-		if(dev_count == MAX_DEV)
-			break;
-#ifdef __DEBUG__
-		printf("%u %u %s\n",major,minor,dev_name);
-		printf("%u %u %s\n",tmp->major,tmp->minor,tmp->dev_name);
-#endif
-	}
-	fclose(ptr);
-}
-
-void get_part_info(const char *file)
-{
-	int  i;
-	int  res;
-	int  major;
-	int  minor;
-	int  begin;
-	FILE *ptr;
-	char *buf;
-	char dev_name[MAX_NAMELEN];
-
-	struct part_info *tmp;
-
-	buf = malloc(MAX_BUFLEN);
-
-	memset(dev_name,0,MAX_NAMELEN);
-	memset(buf,0,MAX_BUFLEN);
-	tmp   = NULL;
-	curr  = 0;
-	begin = 0;
-
-repeat:
-	ptr = fopen(file,"r");
-	if(ptr == NULL)
-	{
-		fprintf(stderr,"%s:%d %s\n",file,errno,strerror(errno));
-		free(buf);
-		return;
-	}
-
-	memcpy(buf,ptr,10);
-	for(i=0;(i<dev_count)&&(fgets(buf,MAX_BUFLEN,ptr)!=NULL);++i)
-	{
-		res = sscanf(buf,init_format,&major,&minor,dev_name);
-		if(res != 3)
-		{
-			fprintf(stderr,"format wrong!\n");
-			free(buf);
-			return;
+			--i;
+			continue;
 		}
 		tmp = &info[i][curr];
-#ifdef __DEBUG__
-		printf("%u %u %s\n",major,minor,dev_name);
-		printf("%u %u %s\n",tmp->major,tmp->minor,tmp->dev_name);
-#endif
-		if((tmp->major == major) &&(tmp->minor == minor) &&
-			!strcmp(tmp->dev_name,dev_name))
+
+		if((tmp->major == major) && (tmp->minor == minor) &&
+				!strcmp(tmp->dev_name,dev_name))
 		{
 			res = sscanf(buf,full_format,&(tmp->major),
 				&(tmp->minor),tmp->dev_name,
@@ -258,26 +160,59 @@ repeat:
 				&(tmp->r_ios[1]),&(tmp->r_sec[1]),
 				&(tmp->p_count[0]),&(tmp->p_count[1]));
 		}
-		else
-		{
-			fprintf(stderr,"dev chagned!\n");
-			free(buf);
-			return;
-		}
 	}
-	fclose(ptr);
-	if(begin)
-		show_part_info();
-	curr = !curr;
-	if(res_count == 0)
-		return;
-	--res_count;
-	++begin;
-	pause();
-	goto repeat;
+	fclose(file);
 }
 
+void init_part_info(const char *file)
+{
+	FILE   *ptr;
+	FILE   *pfile;
+	int    res;
+	int    major;
+	int    minor;
+	char   dev_name[MAX_NAMELEN];
+	char   buf[MAX_BUFLEN];
+	struct part_info *tmp;
 
+	memset(dev_name, 0, MAX_NAMELEN);
+	memset(buf, 0, MAX_BUFLEN);
+	
+	tmp = NULL;
+	ptr = fopen(file,"r");
+	if(ptr == NULL)
+	{
+		fprintf(stderr,"%s:%d %s\n",file,errno,strerror(errno));
+		return;
+	}
+
+	dev_acct = 0;
+	while(fgets(buf, MAX_BUFLEN, ptr) != NULL)
+	{
+		res = sscanf(buf,init_format,&major,&minor,dev_name);
+		if(res != 3)
+			continue;
+		if(major == info[0][0].major && minor == info[0][0].minor &&
+				!strcmp(dev_name,info[0][0].dev_name))
+		{
+			fclose(ptr);
+			return;
+		}
+
+		tmp = &info[dev_acct][0];
+		tmp->major = major;
+		tmp->minor = minor;
+		memcpy(tmp->dev_name,dev_name,MAX_NAMELEN);
+		tmp = &info[dev_acct][1];
+		tmp->major = major;
+		tmp->minor = minor;
+		memcpy(tmp->dev_name,dev_name,MAX_NAMELEN);
+		dev_acct++;
+		if(dev_acct == MAX_DEV)
+			break;
+	}
+	fclose(ptr);
+}
 
 void alarm_handler(int signo)
 {
@@ -287,7 +222,7 @@ void alarm_handler(int signo)
 int main(int args , char **argv)
 {
 	itv = 5;
-	res_count = 1;
+	res_acct = 0;
 
 	switch(args)
 	{
@@ -297,7 +232,7 @@ int main(int args , char **argv)
 			if(argv[1][1] == 't')
 				itv = atoi(argv[2]);
 			else if(argv[1][1] == 'n')
-				res_count = atoi(argv[2]);
+				res_acct = atoi(argv[2]);
 			else
 				return 0;
 			break;
@@ -305,25 +240,19 @@ int main(int args , char **argv)
 			if(argv[1][1] == 't')
 			{
 				itv = atoi(argv[2]);
-#ifdef __DEBUG__
-				printf("%d----\n",itv);
-#endif
 				if(argv[3][1] == 'n')
-					res_count = atoi(argv[4]);
+					res_acct = atoi(argv[4]);
 				else
 					return 0;
 				break;
 			}
 			else if(argv[1][1] == 'n')
 			{
-				res_count =  atoi(argv[2]);
+				res_acct =  atoi(argv[2]);
 				if(argv[3][1] == 't')
 					itv = atoi(argv[4]);
 				else
 					return 0;
-#ifdef __DEBUG__
-				printf("%d\n",itv);
-#endif
 			}
 			else
 				return 0;
@@ -333,21 +262,30 @@ int main(int args , char **argv)
 	}
 			
 	char file_name_buf[MAX_NAMELEN];
-	char res_name_buf[MAX_NAMELEN];
+	FILE *s_file;
+	int  res;
+	
+	curr = 0;
+	res  = 0;
 	
 	memset(file_name_buf,0,MAX_NAMELEN);
-	memset(res_name_buf,0,MAX_NAMELEN);
-	memset(info,0,(sizeof(struct part_info)*MAX_DEV*2));
-
+	memset(info,0,(sizeof(struct part_info) * MAX_DEV * 2));
 	sprintf(file_name_buf,"%s%s",file_path,file_name);
-	sprintf(res_name_buf,"%s%s",result_path,result_name);
 
-	dev_count = 0;
 	init_part_info(file_name_buf);
 
-	signal(SIGALRM,alarm_handler);
+	get_part_info(file_name_buf, curr);
 
+	signal(SIGALRM,alarm_handler);
 	alarm(itv);
-	get_part_info(file_name_buf);
+	while(res < res_acct)
+	{
+		curr = !curr;
+		pause();
+		get_part_info(file_name_buf, curr);
+		cal_part_info(curr);
+		++res;
+	}
 	return 0;
+
 }

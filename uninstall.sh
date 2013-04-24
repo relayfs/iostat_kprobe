@@ -2,9 +2,8 @@
 
 target=iostat_kprobe
 
-if( $(lsmod | grep $target | xargs -0 test -z) )
+if [ ! -z $(lsmod | grep $target | awk '{print $1}') ]
 then
-	echo
-else
-	rmmod $target
+	echo "rmmod $target.ko"
+	rmmod $target.ko
 fi

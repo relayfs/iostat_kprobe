@@ -24,7 +24,7 @@ then
 	p_token_g=$(grep -w $token_g $target | awk '{print $1}')
 fi
 
-module=iostat_kprobe.ko
+module=iostat_kprobe
 token_a=p_$token_a
 token_b=p_$token_b
 token_c=p_$token_c
@@ -33,12 +33,16 @@ token_e=p_$token_e
 token_f=p_$token_f
 token_g=p_$token_g
 
-if( $(lsmod | grep $target | xargs -0 test -z) )
+if [ ! -z $(lsmod | grep $target | awk '{print $1}') ]
 then
-	rmmod $module
+	rmmod $module.ko
 fi
 
-insmod $module $token_a=0x$p_token_a $token_b=0x$p_token_b \
-$token_c=0x$p_token_c $token_d=0x$p_token_d $token_e=0x$p_token_e \
-$token_f=0x$p_token_f $token_g=0x$p_token_g 
+insmod $module.ko $token_a=0x$p_token_a \
+		  $token_b=0x$p_token_b \
+		  $token_c=0x$p_token_c \
+		  $token_d=0x$p_token_d \
+		  $token_e=0x$p_token_e \
+		  $token_f=0x$p_token_f \
+		  $token_g=0x$p_token_g 
 

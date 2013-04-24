@@ -76,6 +76,11 @@ xover=$acct_itv
 let "max_days=($(wc -l $1 | awk '{print $1}')-1)/$acct_itv+1"
 format="l lw 2" 
 
+echo "
+<html>
+<body>
+" > total_result.html
+
 while [ $loop_acct -ne $max_days ] 
 do
 var_time=$year-$month-$day
@@ -113,7 +118,7 @@ set   xtics nomirror
 unset autoscale y
 unset autoscale x
 set   xrange[$xbegin:$xover]
-set   yrange[0.5:1100]
+set   yrange[4:1100]
 set   xtics 20
 set   logscale y 2
 set   ytics 2
@@ -183,10 +188,10 @@ echo "
 <img src="../$image_dir/$1-$var_time-iops.gif" width="1280" height="512">
 </p>
 <p>
-<img src="../$image_dir/$1-$var_time-iowait.gif" width="1280" height="512">
+<img src="../$image_dir/$1-$var_time-avsz.gif" width="1280" height="512">
 </p>
 <p>
-<img src="../$image_dir/$1-$var_time-avsz.gif" width="1280" height="512">
+<img src="../$image_dir/$1-$var_time-iowait.gif" width="1280" height="512">
 </p>
 <p>
 <img src="../$image_dir/$1-$var_time-svctm.gif" width="1280" height="512">
@@ -199,12 +204,24 @@ echo "
 " > $1-$var_time-result.html
 
 mv *.gif $res_image_dir
-mv *.html $res_html_dir
+mv $1-*.html $res_html_dir
+
+echo "
+<p>
+<a href="./$html_dir/$1-$var_time-result.html"> $1-$var_time </a>
+</p>
+" >> total_result.html
 
 let "loop_acct=$loop_acct+1"
 let "begin=$begin+$acct_itv+1"
 let "over=$begin+$acct_itv"
 let "day=$day+1"
 done
+
+echo "
+</body>
+</html>
+" >> total_result.html
+mv total_result.html $res_dir
 
 ./clean.sh

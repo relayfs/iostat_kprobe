@@ -414,7 +414,6 @@ static void proc_stat_acct(struct list_head *hash_list,unsigned int rw,
 }
 #endif  /*__PROC_INFO_ACCT__*/
 
-/* 查找连续的页面缓存 */
 static int find_get_pages_contig_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -470,7 +469,6 @@ static int find_get_pages_contig_pos_ret_handler(struct kretprobe_instance *ri,
 	return 0;
 }
 
-/* 查找单个页面缓存 */
 static int find_get_page_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -524,7 +522,6 @@ static int find_get_page_pos_ret_handler(struct kretprobe_instance *ri,
 	return 0;
 }
 
-/* 提交bio函数，用来统计bio提交次数和扇区数 */
 static int submit_bio_pre_probe(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -571,7 +568,6 @@ static void submit_bio_post_probe(struct kprobe *probe,
 	return;
 }
 
-/* 文件预读函数，用来统计预读页数 */
 static int __do_page_cache_readahead_pre_ret_handler(struct kretprobe_instance *ri,
 			struct pt_regs *regs)
 {
@@ -621,7 +617,6 @@ static int __do_page_cache_readahead_pos_ret_handler(struct kretprobe_instance *
 	return 0;
 }
 
-/* bio合并函数，用来统计bio合并次数 */
 static int elv_bio_merged_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -658,8 +653,6 @@ static void elv_bio_merged_pos_handler(struct kprobe *probe,
 	return;
 }
 
-/* IO请求完成时调用，用来统计IO完成数和所用的时间 */
-/* 完成时请求队列中剩余数目发生变化，因此统计一次等待时间 */
 static int blk_finish_request_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {
@@ -705,7 +698,6 @@ static void blk_finish_request_pos_handler(struct kprobe *probe,
 	return;
 }
 
-/* 统计IO完成的扇区数 */
 static int blk_update_request_pre_handler(struct kprobe *probe,
 			struct pt_regs *regs)
 {

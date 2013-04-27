@@ -29,8 +29,12 @@
 #define MAX_BUFLEN    256
 #define MAX_DEV       16
 #define MAX_TIME      480
+#define SECTOR_SIZE   512
+#define SHIFT         10
 
-#define S_VAL(m,n,p)  (((double) ((n) - (m))) /(p))
+#define S_VAL(m,n,p)    (((double) ((n) - (m))) /(p))
+#define S_DIV(m,p)      ((double) (m) / (p))
+#define SECT_TO_KB(m)   ((unsigned long )((m) * (SECTOR_SIZE)) >> SHIFT) 
 
 #pragma pack(2)
 struct part_info {
@@ -52,8 +56,8 @@ struct part_info {
 const char source_path[] = "/home/cl/workplace/kprobe/iostats";
 const char init_format[] = "%u%u%s";
 const char full_format[] = "%u%u%s%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu%lu";
-const char show_format[] = "%8d %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n";
-const char show_title[]  = "     seq     rd/s    rds/s    rdm/s    rdq/s   rdqs/s     wt/s    wts/s    wtm/s    wtq/s   wtqs/s    rd_sz    wt_sz   h_rate    await    svctm     util\n";
+const char show_format[] = "%8d %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n";
+const char show_title[]  = "     seq     rd/s    rdm/s  rtp/kbs     wt/s    wtm/s  wtp/kbs    rd_sz    wt_sz   h_rate    await    svctm     util\n";
 
 struct part_info info[MAX_DEV][2];
 
@@ -79,6 +83,8 @@ void cal_part_info(int curr)
 	double  wt_sz;
 	double  nr_cache[2];
 	double  hitrate;
+	double  rd_thruput;
+	double  wt_thruput;
 	for(i=0; i<dev_acct; ++i)
 	{
 		pos = &info[i][curr];
@@ -92,9 +98,12 @@ void cal_part_info(int curr)
 		util   = S_VAL(pre->io_ticks,pos->io_ticks,itv*10);
 		svctm  = nr_ios ? ((pos->io_ticks-pre->io_ticks)/nr_ios) : 0.0;
 
-		rd_sz  = rd_nr_ios ? (pos->f_sec[0]-pre->f_sec[0])/rd_nr_ios : 0.0;
-		wt_sz  = wt_nr_ios ? (pos->f_sec[1]-pre->f_sec[1])/wt_nr_ios : 0.0;
+		rd_sz  = rd_nr_ios ? SECT_TO_KB(pos->f_sec[0]-pre->f_sec[0])/rd_nr_ios : 0.0;
+		wt_sz  = wt_nr_ios ? SECT_TO_KB(pos->f_sec[1]-pre->f_sec[1])/wt_nr_ios : 0.0;
 		
+		rd_thruput  = SECT_TO_KB(pos->f_sec[0]-pre->f_sec[0]);
+		wt_thruput  = SECT_TO_KB(pos->f_sec[1]-pre->f_sec[1]);
+
 		nr_cache[0] = (double)(pos->p_count[0]-pre->p_count[0]);
 		nr_cache[1] = (double)(pos->p_count[1]-pre->p_count[1]);
 		hitrate     = nr_cache[0] ? nr_cache[1]*100/nr_cache[0] : 0.0;
@@ -102,16 +111,12 @@ void cal_part_info(int curr)
 		tmp = fopen(pre->dev_name ,"a");
 		fprintf(tmp,show_format,seq,
 			S_VAL(pre->f_ios[0],pos->f_ios[0],itv),
-			S_VAL(pre->f_sec[0],pos->f_sec[0],itv),
 			S_VAL(pre->merges[0],pos->merges[0],itv),
-			S_VAL(pre->r_ios[0],pos->r_ios[0],itv),
-			S_VAL(pre->r_sec[0],pos->r_sec[0],itv),
+			S_DIV(rd_thruput,itv),
 
 			S_VAL(pre->f_ios[1],pos->f_ios[1],itv),
-			S_VAL(pre->f_sec[1],pos->f_sec[1],itv),
 			S_VAL(pre->merges[1],pos->merges[1],itv),
-			S_VAL(pre->r_ios[1],pos->r_ios[1],itv),
-			S_VAL(pre->r_sec[1],pos->r_sec[1],itv),
+			S_DIV(wt_thruput,itv),
 
 			rd_sz,wt_sz,hitrate,await,svctm,util);
 		fclose(tmp);

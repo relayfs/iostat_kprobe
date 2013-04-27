@@ -105,10 +105,32 @@ set   ytics 2
 set   grid x
 set   grid y
 plot  "$1" every $step::$begin::$over using 1:2 w $format t "rd/s",\
-      "$1" every $step::$begin::$over using 1:4 w $format t "rdm/s",\
-      "$1" every $step::$begin::$over using 1:7 w $format t "wt/s",\
-      "$1" every $step::$begin::$over using 1:9 w $format t "wtm/s"
+      "$1" every $step::$begin::$over using 1:3 w $format t "rdm/s",\
+      "$1" every $step::$begin::$over using 1:5 w $format t "wt/s",\
+      "$1" every $step::$begin::$over using 1:6 w $format t "wtm/s"
 unset output
+
+reset
+set   term gif size 1280,512
+set   title  "$1-$var_time-$hour-$minuter-thruput"
+set   output "$1-$var_time-thruput.gif"
+set   xlabel "time"
+set   ylabel "thruput(kb/s)"
+set   ytics nomirror
+set   xtics nomirror
+unset autoscale y
+unset autoscale x
+set   xrange[$xbegin:$xover]
+set   yrange[0.5:204801]
+set   xtics 20
+set   logscale y 2
+set   ytics 2
+set   grid x
+set   grid y
+plot  "$1" every $step::$begin::$over using 1:4 w $format t "rtp/kbs",\
+      "$1" every $step::$begin::$over using 1:7 w $format t "wtp/kbs"
+unset output
+
 reset
 set   term gif size 1280,512
 set   title  "$1-$var_time-$hour-$minuter-avsz"
@@ -123,11 +145,11 @@ set   xtics 20
 set   logscale y 2
 set   ytics 2
 set   xlabel "time"
-set   ylabel "avsz"
+set   ylabel "avsz(kb)"
 set   grid x
 set   grid y
-plot  "$1" every $step::$begin::$over using 1:12 w $format t "rd_sz",\
-      "$1" every $step::$begin::$over using 1:13 w $format t "wt_sz"
+plot  "$1" every $step::$begin::$over using 1:8 w $format t "rd_sz",\
+      "$1" every $step::$begin::$over using 1:9 w $format t "wt_sz"
 unset output
 reset
 set   term gif size 1280,512
@@ -136,13 +158,16 @@ set   output "$1-$var_time-iowait.gif"
 set   ytics nomirror
 set   xtics nomirror
 unset autoscale x
+unset autoscale y
 set   xrange[$xbegin:$xover]
+set   yrange[0:401]
 set   xtics 20
+set   ytics 50
 set   xlabel "time"
 set   ylabel "iowait"
 set   grid x
 set   grid y
-plot  "$1" every $step::$begin::$over using 1:15 w $format t "iowait"
+plot  "$1" every $step::$begin::$over using 1:11 w $format t "iowait"
 unset output
 reset
 set   term gif size 1280,512
@@ -160,8 +185,8 @@ set   xlabel "time"
 set   ylabel "rate"
 set   grid x
 set   grid y
-plot  "$1" every $step::$begin::$over using 1:14 w $format t "hrate",\
-      "$1" every $step::$begin::$over using 1:17 w $format t "util"
+plot  "$1" every $step::$begin::$over using 1:10 w $format t "hrate",\
+      "$1" every $step::$begin::$over using 1:13 w $format t "util"
 unset output
 reset
 set   term gif size 1280,512
@@ -170,13 +195,16 @@ set   output "$1-$var_time-svctm.gif"
 set   ytics nomirror
 set   xtics nomirror
 unset autoscale x
+unset autoscale y
 set   xrange[$xbegin:$xover]
+set   yrange[0:4]
 set   xtics 20
+set   ytics 0.5
 set   xlabel "time"
 set   ylabel "svctm"
 set   grid x
 set   grid y
-plot  "$1" every $step::$begin::$over using 1:16 w $format t "svctm"
+plot  "$1" every $step::$begin::$over using 1:12 w $format t "svctm"
 unset output
 reset
 EOF
@@ -186,6 +214,9 @@ echo "
 <body>
 <p>
 <img src="../$image_dir/$1-$var_time-iops.gif" width="1280" height="512">
+</p>
+<p>
+<img src="../$image_dir/$1-$var_time-thruput.gif" width="1280" height="512">
 </p>
 <p>
 <img src="../$image_dir/$1-$var_time-avsz.gif" width="1280" height="512">

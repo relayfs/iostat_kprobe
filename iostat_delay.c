@@ -144,6 +144,8 @@ int get_part_info(FILE *file,const int curr)
 		res = sscanf(buf, init_format, &major, &minor, dev_name);
 		if(res != 3)
 		{
+			if(res == 0)
+				get_part_info(file,!curr);
 			--i;
 			continue;
 		}

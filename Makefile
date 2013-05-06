@@ -10,8 +10,9 @@
 obj-m := iostat_kprobe.o
 
 KDIR := /lib/modules/$(shell uname -r)/build/
+#KDIR := /home/cl/src/linux-2.6.37/
 PWD  := $(shell pwd)
-CC =  gcc -g -D __SHOW__ -D __PROC_INFO_ACCT__
+CC =  gcc -g -D __SHOW__ 
 
 all:
 	make -C $(KDIR) M=$(PWD) modules

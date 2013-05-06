@@ -95,6 +95,7 @@ struct part_info {
 	unsigned long     p_cache[3];
 	unsigned long     io_ticks;
 	unsigned long     time_in_queue;
+	spinlock_t        s_lock;
 };
 static struct list_head  proc_info_hlist[MAX_HASH_LIST];
 static struct list_head  part_info_list;
@@ -262,31 +263,49 @@ static inline void __part_stat_acct(struct part_info *info,unsigned int rw,
 	switch(flag)
 	{
 		case IOS:
+			spin_lock(&info->s_lock);
 			info->f_ios[rw]     += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case MERGES:
+			spin_lock(&info->s_lock);
 			info->f_merges[rw]  += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case TICKS:
+			spin_lock(&info->s_lock);
 			info->f_ticks[rw]   += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case SECTORS:
+			spin_lock(&info->s_lock);
 			info->f_sectors[rw] += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case RIOS:
+			spin_lock(&info->s_lock);
 			info->r_ios[rw]     += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case RSECTORS:
+			spin_lock(&info->s_lock);
 			info->r_sectors[rw] += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case PCACHE:
+			spin_lock(&info->s_lock);
 			info->p_cache[rw]   += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case IO_TICKS:
+			spin_lock(&info->s_lock);
 			info->io_ticks      += val;
+			spin_unlock(&info->s_lock);
 			break;
 		case TIME_IN_QUEUE:
+			spin_lock(&info->s_lock);
 			info->time_in_queue += val;
+			spin_unlock(&info->s_lock);
 			break;
 		default:
 			break;
@@ -958,6 +977,7 @@ static int __init iostat_init(void)
 			memset(tmp,0,part_info_len);
 			tmp->part = part;
 			tmp->disk = disk;
+			spin_lock_init(&tmp->s_lock);
 			list_add(&(tmp->list),&part_info_list);
 		}
 		disk_part_iter_exit(&piter);

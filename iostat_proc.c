@@ -228,7 +228,7 @@ void alarm_handler(int signo)
 int main(int args , char **argv)
 {
 	itv = 5;
-	res_acct = 0;
+	res_acct = 5;
 
 	switch(args)
 	{
